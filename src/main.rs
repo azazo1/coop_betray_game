@@ -587,7 +587,7 @@ fn simulate(a: &mut dyn Strategy, b: &mut dyn Strategy, rounds: usize) -> (i32, 
 }
 
 use clap::Parser;
-/// 模拟两个博弈策略的对局
+/// 进行策略对局模拟
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -695,6 +695,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!(
         "=== 最终排名 ({} 局 {} 轮) ===",
         simulations, rounds_per_simulation
+    );
+    println!(
+        "{:3} {:10} {:} {:>12}",
+        "排名", "策略", "所有对局总得分", "每次对局得分"
     );
     for (i, (name, score)) in ranking.iter().enumerate() {
         println!(

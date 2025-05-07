@@ -548,115 +548,6 @@ use std::fs::File;
 // 类型别名简化代码
 type StrategyName = &'static str;
 
-fn main() -> Result<(), Box<dyn Error>> {
-    // 初始化数据存储
-    let mut total_scores: HashMap<StrategyName, i32> = HashMap::new();
-    let mut match_records = Vec::new();
-    let round_per_simulation = 400; // 每次对局进行的回合.
-    let simulation = 100; // 两个策略对局多少次.
-
-    // 策略列表
-    let strategies: [(usize, StrategyName); 15] = [
-        (1, "TitForTat"), // 该策略首先合作, 随后每一轮模仿对手的上一轮选择, 即对手合作则合作, 对手背叛则背叛.
-        (2, "TidemanChieruzzi"), // 该策略以合作开始, 采用以牙还牙策略. 然而, 当对手进行第二次连续背叛时, 增加惩罚力度, 每次对手连续背叛都会增加一次惩罚性背叛.
-        (3, "Nydegger"), // 该策略在前三步使用以牙还牙策略, 之后根据前三步的结果计算一个值 A, 并根据 A 的特定值决定是否背叛.
-        (4, "Grofman"), // 该策略在双方上一步选择相同时合作; 如果上一步选择不同, 则以 2/7 的概率合作.
-        (5, "Shubik"),  // 该策略在对手背叛后进行报复, 最初背叛一次, 随后每次增加一次报复的长度.
-        (6, "SteinRapoport"), // 该策略前四步合作, 之后采用以牙还牙策略, 每 15 步检查对手是否随机行动, 并在最后两步背叛.
-        (7, "Grudger"),       // 该策略开始时合作, 但一旦对手背叛, 将永久背叛.
-        (8, "Davis"),         // 该策略前 10 步合作, 之后如果对手曾经背叛过, 则永久背叛.
-        (9, "Graaskamp"), // 该策略前 50 步采用以牙还牙策略, 第 51 步背叛, 接着再进行 5 步以牙还牙策略, 然后检测对手是否随机行动, 若是, 则持续背叛.
-        (10, "Downing"), // 该策略根据对手合作或背叛的固定概率, 持续更新对对手行为的估计, 并选择能最大化自身长期收益的行动.
-        (11, "Feld"), // 该策略采用以牙还牙策略, 但在对手合作后以逐渐降低的概率继续合作, 直到该概率降至 0.5.
-        (12, "Joss"), // 该策略在对手合作后有 90% 的概率合作, 总是对对手的背叛进行背叛.
-        (13, "Tullock"), // 该策略前 11 步合作, 之后根据对手在前 10 步的合作比例减少 10% 的合作概率.
-        (14, "Anonymous"), // 该策略初始合作概率为 30%, 每 10 步更新一次, 根据对手行为调整合作概率, 但通常保持在 30%-70% 之间.
-        (15, "Random"),    // 该策略以 50% 的概率随机选择合作或背叛.
-    ];
-
-    // 全排列对战模拟
-    for (a_id, a_name) in strategies.iter() {
-        for (b_id, b_name) in strategies.iter() {
-            let mut a_total = 0;
-            let mut b_total = 0;
-
-            // 进行30次独立对战
-            for _ in 0..simulation {
-                let mut p1 = create_strategy(*a_id);
-                let mut p2 = create_strategy(*b_id);
-                let (score_a, score_b) = simulate(&mut *p1, &mut *p2, round_per_simulation);
-
-                a_total += score_a;
-                b_total += score_b;
-            }
-
-            // 记录对战结果
-            match_records.push((
-                *a_name,
-                *b_name,
-                a_total,
-                b_total,
-                a_total as f32 / simulation as f32, // 平均每次对战得分
-                b_total as f32 / simulation as f32,
-            ));
-
-            // 更新总得分
-            *total_scores.entry(a_name).or_insert(0) += a_total;
-            *total_scores.entry(b_name).or_insert(0) += b_total;
-        }
-    }
-
-    // 写入详细对战记录
-    let mut match_wtr = Writer::from_writer(File::create("match_results.csv")?);
-    match_wtr.write_record(&["PlayerA", "PlayerB", "TotalA", "TotalB", "AvgA", "AvgB"])?;
-
-    for record in &match_records {
-        match_wtr.write_record(&[
-            record.0,
-            record.1,
-            &record.2.to_string(),
-            &record.3.to_string(),
-            &format!("{:.1}", record.4),
-            &format!("{:.1}", record.5),
-        ])?;
-    }
-
-    // 生成总得分排名
-    let mut ranking: Vec<_> = total_scores.iter().collect();
-    ranking.sort_by(|(_, a), (_, b)| b.cmp(a));
-
-    // 写入总得分排名
-    let mut rank_wtr = Writer::from_writer(File::create("ranking.csv")?);
-    rank_wtr.write_record(&["Rank", "Strategy", "TotalScore", "AvgScorePerGame"])?;
-
-    for (i, (name, score)) in ranking.iter().enumerate() {
-        rank_wtr.write_record(&[
-            &(i + 1).to_string(),
-            **name,
-            &score.to_string(),
-            &format!("{:.1}", **score as f32 / simulation as f32),
-        ])?;
-    }
-
-    // 打印结果摘要
-    println!(
-        "=== 最终排名 ({} 局 {} 轮) ===",
-        simulation, round_per_simulation
-    );
-    for (i, (name, score)) in ranking.iter().enumerate() {
-        println!(
-            "{:2}. {:20} {:>8} {:>10.2}",
-            i + 1,
-            name,
-            score,
-            **score as f32 / simulation as f32
-        );
-    }
-
-    println!("\n数据已保存到 match_results.csv 和 ranking.csv");
-    Ok(())
-}
-
 // 模拟函数
 fn simulate(a: &mut dyn Strategy, b: &mut dyn Strategy, rounds: usize) -> (i32, i32) {
     let mut actions_a = Vec::new();
@@ -693,4 +584,128 @@ fn simulate(a: &mut dyn Strategy, b: &mut dyn Strategy, rounds: usize) -> (i32, 
     }
 
     (score_a, score_b)
+}
+
+use clap::Parser;
+/// 模拟两个博弈策略的对局
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// 两个博弈策略对局的总次数
+    #[arg(short, long, default_value_t = 100)]
+    simulations: usize,
+    /// 每一次对局中的回合数
+    #[arg(short, long, default_value_t = 400)]
+    rounds_per_simulation: usize,
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    let args = Args::parse();
+    let simulations = args.simulations; // 两个策略对局多少次.
+    let rounds_per_simulation = args.rounds_per_simulation; // 每次对局进行的回合.
+
+    // 初始化数据存储
+    let mut total_scores: HashMap<StrategyName, i32> = HashMap::new();
+    let mut match_records = Vec::new();
+
+    // 策略列表
+    let strategies: [(usize, StrategyName); 15] = [
+        (1, "TitForTat"), // 该策略首先合作, 随后每一轮模仿对手的上一轮选择, 即对手合作则合作, 对手背叛则背叛.
+        (2, "TidemanChieruzzi"), // 该策略以合作开始, 采用以牙还牙策略. 然而, 当对手进行第二次连续背叛时, 增加惩罚力度, 每次对手连续背叛都会增加一次惩罚性背叛.
+        (3, "Nydegger"), // 该策略在前三步使用以牙还牙策略, 之后根据前三步的结果计算一个值 A, 并根据 A 的特定值决定是否背叛.
+        (4, "Grofman"), // 该策略在双方上一步选择相同时合作; 如果上一步选择不同, 则以 2/7 的概率合作.
+        (5, "Shubik"),  // 该策略在对手背叛后进行报复, 最初背叛一次, 随后每次增加一次报复的长度.
+        (6, "SteinRapoport"), // 该策略前四步合作, 之后采用以牙还牙策略, 每 15 步检查对手是否随机行动, 并在最后两步背叛.
+        (7, "Grudger"),       // 该策略开始时合作, 但一旦对手背叛, 将永久背叛.
+        (8, "Davis"),         // 该策略前 10 步合作, 之后如果对手曾经背叛过, 则永久背叛.
+        (9, "Graaskamp"), // 该策略前 50 步采用以牙还牙策略, 第 51 步背叛, 接着再进行 5 步以牙还牙策略, 然后检测对手是否随机行动, 若是, 则持续背叛.
+        (10, "Downing"), // 该策略根据对手合作或背叛的固定概率, 持续更新对对手行为的估计, 并选择能最大化自身长期收益的行动.
+        (11, "Feld"), // 该策略采用以牙还牙策略, 但在对手合作后以逐渐降低的概率继续合作, 直到该概率降至 0.5.
+        (12, "Joss"), // 该策略在对手合作后有 90% 的概率合作, 总是对对手的背叛进行背叛.
+        (13, "Tullock"), // 该策略前 11 步合作, 之后根据对手在前 10 步的合作比例减少 10% 的合作概率.
+        (14, "Anonymous"), // 该策略初始合作概率为 30%, 每 10 步更新一次, 根据对手行为调整合作概率, 但通常保持在 30%-70% 之间.
+        (15, "Random"),    // 该策略以 50% 的概率随机选择合作或背叛.
+    ];
+
+    // 全排列对战模拟
+    for (a_id, a_name) in strategies.iter() {
+        for (b_id, b_name) in strategies.iter() {
+            let mut a_total = 0;
+            let mut b_total = 0;
+
+            // 进行30次独立对战
+            for _ in 0..simulations {
+                let mut p1 = create_strategy(*a_id);
+                let mut p2 = create_strategy(*b_id);
+                let (score_a, score_b) = simulate(&mut *p1, &mut *p2, rounds_per_simulation);
+
+                a_total += score_a;
+                b_total += score_b;
+            }
+
+            // 记录对战结果
+            match_records.push((
+                *a_name,
+                *b_name,
+                a_total,
+                b_total,
+                a_total as f32 / simulations as f32, // 平均每次对战得分
+                b_total as f32 / simulations as f32,
+            ));
+
+            // 更新总得分
+            *total_scores.entry(a_name).or_insert(0) += a_total;
+            *total_scores.entry(b_name).or_insert(0) += b_total;
+        }
+    }
+
+    // 写入详细对战记录
+    let mut match_wtr = Writer::from_writer(File::create("match_results.csv")?);
+    match_wtr.write_record(&["PlayerA", "PlayerB", "TotalA", "TotalB", "AvgA", "AvgB"])?;
+
+    for record in &match_records {
+        match_wtr.write_record(&[
+            record.0,
+            record.1,
+            &record.2.to_string(),
+            &record.3.to_string(),
+            &format!("{:.1}", record.4),
+            &format!("{:.1}", record.5),
+        ])?;
+    }
+
+    // 生成总得分排名
+    let mut ranking: Vec<_> = total_scores.iter().collect();
+    ranking.sort_by(|(_, a), (_, b)| b.cmp(a));
+
+    // 写入总得分排名
+    let mut rank_wtr = Writer::from_writer(File::create("ranking.csv")?);
+    rank_wtr.write_record(&["Rank", "Strategy", "TotalScore", "AvgScorePerGame"])?;
+
+    for (i, (name, score)) in ranking.iter().enumerate() {
+        rank_wtr.write_record(&[
+            &(i + 1).to_string(),
+            **name,
+            &score.to_string(),
+            &format!("{:.1}", **score as f32 / simulations as f32),
+        ])?;
+    }
+
+    // 打印结果摘要
+    println!(
+        "=== 最终排名 ({} 局 {} 轮) ===",
+        simulations, rounds_per_simulation
+    );
+    for (i, (name, score)) in ranking.iter().enumerate() {
+        println!(
+            "{:2}. {:20} {:>8} {:>10.2}",
+            i + 1,
+            name,
+            score,
+            **score as f32 / simulations as f32
+        );
+    }
+
+    println!("\n数据已保存到 match_results.csv 和 ranking.csv");
+    Ok(())
 }
